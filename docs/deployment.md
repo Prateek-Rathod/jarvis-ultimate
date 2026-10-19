@@ -17,7 +17,7 @@ No production deployment has been performed or verified.
 
 1. Confirm the Vercel project root is the repository root. Set `VITE_API_BASE_URL` to the exact Vercel site origin above in the Production environment.
 2. On Render, set the production variables above, including the exact `WEB_ORIGIN` without a trailing slash and `TRUST_PROXY_HOPS=1`.
-3. Set Render's build command to `npm ci && npm run build --workspace @jarvis/api`; the API workspace generates Prisma Client before building.
+3. Set Render's build command to `npm ci --include=dev && npm run build --workspace @jarvis/api`; TypeScript, Prisma CLI, workspace type declarations, and other build-time tools are development dependencies. The API production TypeScript config excludes tests, and the API workspace generates Prisma Client before building. `--include=dev` makes the build dependencies available without changing `NODE_ENV` or moving test-only packages into production dependencies.
 4. Set Render's pre-deploy command to `npm run db:deploy --workspace @jarvis/api`. `prisma migrate deploy` applies committed migrations only; do not use `migrate reset` or `migrate dev` in production.
 5. Set Render's start command to `npm run start --workspace @jarvis/api`. Keep Render's assigned `PORT`; do not hardcode port 3001 in production.
 6. Deploy the API and wait for it to become healthy. Check `https://jarvis-ultimate.onrender.com/health/live` and `/health/ready`.

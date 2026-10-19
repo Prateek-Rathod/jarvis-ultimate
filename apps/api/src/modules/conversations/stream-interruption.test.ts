@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from "express";
+import type { NextFunction, Request, Response as ExpressResponse } from "express";
 import express from "express";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +30,7 @@ vi.mock("../../database/client.js", () => ({
   },
 }));
 vi.mock("../../middleware/authentication.js", () => ({
-  authenticate: (request: Request, _response: Response, next: NextFunction) => {
+  authenticate: (request: Request, _response: ExpressResponse, next: NextFunction) => {
     request.auth = {
       user: {
         id: "test-user",
@@ -43,7 +43,7 @@ vi.mock("../../middleware/authentication.js", () => ({
     };
     next();
   },
-  requireCsrf: (_request: Request, _response: Response, next: NextFunction) => next(),
+  requireCsrf: (_request: Request, _response: ExpressResponse, next: NextFunction) => next(),
 }));
 
 import { conversationRouter } from "./routes.js";
@@ -53,7 +53,7 @@ const conversationId = "0236facc-eccc-4c5f-8c23-c6ff2537f54e";
 const app = express();
 app.use(express.json());
 app.use(conversationRouter);
-app.use((error: unknown, _request: Request, response: Response, next: NextFunction) => {
+app.use((error: unknown, _request: Request, response: ExpressResponse, next: NextFunction) => {
   void next;
   response.status(500).json({ error: error instanceof Error ? error.message : "unknown" });
 });

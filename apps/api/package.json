@@ -7,7 +7,7 @@
     "predev": "npm run db:generate",
     "dev": "tsx watch --exclude ../../node_modules/.prisma/** src/server.ts",
     "prebuild": "npm run db:generate",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
