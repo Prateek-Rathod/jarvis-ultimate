@@ -1,8 +1,13 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Check, Circle, Plus, Trash2 } from "lucide-react";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, Check, Circle, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { apiRequest, ApiError } from "../../lib/api";
 import type { Task } from "../../types";
+
+interface TaskPage {
+  tasks: Task[];
+  pagination: { nextCursor: string | null };
+}
 
 export function TasksPage() {
   const queryClient = useQueryClient();
@@ -10,9 +15,15 @@ export function TasksPage() {
   const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState("");
-  const tasksQuery = useQuery({
+  const tasksQuery = useInfiniteQuery({
     queryKey: ["tasks"],
-    queryFn: () => apiRequest<Task[]>("/api/v1/tasks"),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: "50" });
+      if (pageParam) params.set("cursor", pageParam);
+      return apiRequest<TaskPage>(`/api/v1/tasks?${params.toString()}`);
+    },
+    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
   });
   const createTask = useMutation({
     mutationFn: () =>
@@ -50,7 +61,7 @@ export function TasksPage() {
     onError: (cause) =>
       setError(cause instanceof Error ? cause.message : "Task could not be deleted."),
   });
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [];
   const openTasks = tasks.filter((task) => task.status === "open");
   const completedTasks = tasks.filter((task) => task.status === "completed");
 
@@ -182,6 +193,32 @@ export function TasksPage() {
             ))}
           </ul>
         </section>
+      )}
+      {tasksQuery.hasNextPage && (
+        <div className="task-pagination">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void tasksQuery.fetchNextPage()}
+            disabled={tasksQuery.isFetchingNextPage}
+          >
+            {tasksQuery.isFetchingNextPage ? (
+              <>
+                <LoaderCircle size={15} /> Loading more tasks…
+              </>
+            ) : (
+              "Load more tasks"
+            )}
+          </button>
+        </div>
+      )}
+      {tasksQuery.isFetchNextPageError && (
+        <div className="inline-error" role="alert">
+          Could not load more tasks.{" "}
+          <button type="button" onClick={() => void tasksQuery.fetchNextPage()}>
+            Retry
+          </button>
+        </div>
       )}
     </div>
   );

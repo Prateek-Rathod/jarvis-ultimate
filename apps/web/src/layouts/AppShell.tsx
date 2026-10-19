@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -6,27 +7,34 @@ import {
   Brain,
   ChevronDown,
   CheckSquare,
+  Cpu,
   LayoutDashboard,
   LogOut,
   Menu,
   Search,
+  Settings,
   Sparkles,
   X,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
-import type { User } from "../types";
+import { cancelSpeech } from "../lib/speechControls";
+import type { User, UserPreferences } from "../types";
 
 const navigation = [
   { label: "Overview", to: "/", icon: LayoutDashboard },
   { label: "Voice", to: "/voice", icon: AudioLines },
   { label: "Tasks", to: "/tasks", icon: CheckSquare },
+  { label: "Agent Mode", to: "/agent", icon: Cpu },
   { label: "Memory", to: "/memory", icon: Brain },
+  { label: "Settings", to: "/settings", icon: Settings },
 ];
 const pageNames: Record<string, string> = {
   "/": "Overview",
   "/voice": "Voice Assistant",
   "/tasks": "Tasks",
+  "/agent": "Agent Mode",
   "/memory": "Memory",
+  "/settings": "Settings",
 };
 const commands = [
   { label: "Open dashboard", path: "/", keywords: "home overview dashboard" },
@@ -36,6 +44,8 @@ const commands = [
     keywords: "chat conversation ask microphone speak voice",
   },
   { label: "View tasks", path: "/tasks", keywords: "todo productivity" },
+  { label: "Open Agent Mode", path: "/agent", keywords: "premium automation actions execute" },
+  { label: "Open settings", path: "/settings", keywords: "preferences voice theme speech" },
   { label: "Create a task", path: "/tasks", keywords: "new add task" },
 ];
 
@@ -45,6 +55,11 @@ export function AppShell({ user, onSignOut }: { user: User; onSignOut: () => voi
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [signOutError, setSignOutError] = useState("");
+  const queryClient = useQueryClient();
+  const preferencesQuery = useQuery({
+    queryKey: ["preferences"],
+    queryFn: () => apiRequest<UserPreferences>("/api/v1/preferences"),
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const filteredCommands = useMemo(() => {
@@ -53,6 +68,28 @@ export function AppShell({ user, onSignOut }: { user: User; onSignOut: () => voi
       (command) => !query || `${command.label} ${command.keywords}`.includes(query),
     );
   }, [commandQuery]);
+
+  useEffect(() => {
+    const preferences = preferencesQuery.data;
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const updateAppearance = () => {
+      const theme =
+        preferences?.theme === "system" || !preferences?.theme
+          ? media.matches
+            ? "light"
+            : "dark"
+          : preferences.theme;
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.reduceMotion = String(preferences?.reduceMotion ?? false);
+    };
+    updateAppearance();
+    media.addEventListener("change", updateAppearance);
+    return () => media.removeEventListener("change", updateAppearance);
+  }, [preferencesQuery.data]);
+
+  useEffect(() => {
+    if (preferencesQuery.data?.autoSpeak === false) cancelSpeech(window.speechSynthesis);
+  }, [preferencesQuery.data?.autoSpeak]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -69,6 +106,7 @@ export function AppShell({ user, onSignOut }: { user: User; onSignOut: () => voi
   async function signOut() {
     try {
       await apiRequest("/api/v1/auth/logout", { method: "POST" });
+      queryClient.clear();
       onSignOut();
     } catch {
       setSignOutError("Could not sign out. Check your connection and try again.");

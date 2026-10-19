@@ -112,6 +112,14 @@ describe("API security and liveness", () => {
     const response = await fetch(`${origin}/api/v1/auth/session`);
     expect(response.status).toBe(401);
     expect((await response.json()).error.code).toBe("UNAUTHENTICATED");
+
+    const preferences = await fetch(`${origin}/api/v1/preferences`);
+    expect(preferences.status).toBe(401);
+    expect((await preferences.json()).error.code).toBe("UNAUTHENTICATED");
+
+    const agentCapabilities = await fetch(`${origin}/api/v1/agent/capabilities`);
+    expect(agentCapabilities.status).toBe(401);
+    expect((await agentCapabilities.json()).error.code).toBe("UNAUTHENTICATED");
   });
 
   it("rejects state-changing requests from an untrusted origin", async () => {

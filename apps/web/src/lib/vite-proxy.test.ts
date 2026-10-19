@@ -24,6 +24,10 @@ describe("Vite API proxy", () => {
         source: "/health/:path*",
         destination: "https://jarvis-ultimate.onrender.com/health/:path*",
       },
+      {
+        source: "/(.*)",
+        destination: "/index.html",
+      },
     ]);
   });
 });

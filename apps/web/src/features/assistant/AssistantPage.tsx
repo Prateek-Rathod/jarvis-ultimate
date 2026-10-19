@@ -17,38 +17,21 @@ import {
   StopCircle,
 } from "lucide-react";
 import { apiRequest, ApiError, buildApiUrl, getCsrfToken } from "../../lib/api";
-import type { Conversation, Message } from "../../types";
+import { markdownToSpeech } from "../../lib/markdownToSpeech";
+import {
+  applySpeechOptions,
+  cancelSpeech,
+  resolveSpeechOptions,
+  shouldSpeakResponse,
+} from "../../lib/speechControls";
+import { VoiceTranscriptSession } from "../../lib/voiceTranscript";
+import {
+  getSpeechRecognitionConstructor,
+  type SpeechRecognitionLike,
+} from "../../lib/speechRecognition";
+import type { Conversation, Message, UserPreferences } from "../../types";
 
 const STREAM_REQUEST_TIMEOUT_MS = 130_000;
-
-interface SpeechRecognitionResult {
-  readonly isFinal: boolean;
-  readonly 0: { readonly transcript: string };
-}
-interface SpeechRecognitionEvent extends Event {
-  readonly resultIndex: number;
-  readonly results: ArrayLike<SpeechRecognitionResult>;
-}
-interface SpeechRecognitionErrorEvent extends Event {
-  readonly error: string;
-}
-interface SpeechRecognitionLike extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
-}
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionLike;
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-  }
-}
 
 export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
   const queryClient = useQueryClient();
@@ -62,16 +45,22 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const recognitionDraftRef = useRef("");
+  const transcriptSessionRef = useRef<VoiceTranscriptSession | null>(null);
+  const sendInProgressRef = useRef(false);
+  const speechSequenceRef = useRef(0);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const localMessageSequenceRef = useRef(0);
-  const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+  const Recognition = getSpeechRecognitionConstructor();
 
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: () => apiRequest<Conversation[]>("/api/v1/conversations"),
+  });
+  const preferencesQuery = useQuery({
+    queryKey: ["preferences"],
+    queryFn: () => apiRequest<UserPreferences>("/api/v1/preferences"),
   });
   const activeConversationId =
     selectedId ?? (voiceMode ? null : conversationsQuery.data?.[0]?.id) ?? null;
@@ -91,8 +80,9 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      transcriptSessionRef.current?.cancel();
       recognitionRef.current?.abort();
-      window.speechSynthesis?.cancel();
+      cancelSpeech(window.speechSynthesis);
     };
   }, []);
 
@@ -111,9 +101,13 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
   async function sendMessage(event?: FormEvent<HTMLFormElement>, retryContent?: string) {
     event?.preventDefault();
     const content = (retryContent ?? draft).trim();
-    if (!content || sending) return;
+    if (!content || sendInProgressRef.current) return;
+    sendInProgressRef.current = true;
     shouldAutoScrollRef.current = true;
-    if (listening) recognitionRef.current?.stop();
+    if (listening) {
+      transcriptSessionRef.current?.cancel();
+      recognitionRef.current?.stop();
+    }
     setDraft("");
     setError("");
     setSending(true);
@@ -233,7 +227,9 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
         queryClient.invalidateQueries({ queryKey: ["messages", conversationId] }),
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
       ]);
-      if (voiceMode && responseText) speak(responseText);
+      if (shouldSpeakResponse(preferencesQuery.data?.autoSpeak ?? false, voiceMode, responseText)) {
+        speak(responseText);
+      }
     } catch (cause) {
       const connectionFailure =
         cause instanceof TypeError ||
@@ -258,6 +254,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
     } finally {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
       abortRef.current = null;
+      sendInProgressRef.current = false;
       setSending(false);
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       composerRef.current?.focus();
@@ -271,45 +268,67 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
       );
       return;
     }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(
-      text.replace(/```[\s\S]*?```/g, "Code block omitted."),
+    const spokenText = markdownToSpeech(text);
+    if (!spokenText) return;
+    cancelSpeech(window.speechSynthesis);
+    const sequence = ++speechSequenceRef.current;
+    const preferences = preferencesQuery.data;
+    const utterance = new SpeechSynthesisUtterance(spokenText);
+    applySpeechOptions(
+      utterance,
+      resolveSpeechOptions(
+        preferences ?? { speechVoice: null, speechRate: 1, speechPitch: 1 },
+        window.speechSynthesis.getVoices(),
+        navigator.language,
+      ),
     );
-    utterance.onstart = () => setSpeaking(true);
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
+    utterance.onstart = () => {
+      if (sequence === speechSequenceRef.current) setSpeaking(true);
+    };
+    utterance.onend = () => {
+      if (sequence === speechSequenceRef.current) setSpeaking(false);
+    };
+    utterance.onerror = () => {
+      if (sequence === speechSequenceRef.current) setSpeaking(false);
+    };
     window.speechSynthesis.speak(utterance);
   }
 
   function toggleRecognition() {
-    if (listening) {
+    if (recognitionRef.current) {
       recognitionRef.current?.stop();
       return;
     }
+    if (sendInProgressRef.current) return;
     if (!Recognition) {
       setError(
         "Speech recognition is not supported by this browser. Use the text composer instead.",
       );
       return;
     }
-    window.speechSynthesis?.cancel();
+    cancelSpeech(window.speechSynthesis);
     setSpeaking(false);
     const recognition = new Recognition();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = navigator.language;
-    recognitionDraftRef.current = draft.trim();
+    const transcriptSession = new VoiceTranscriptSession(draft.trim(), (content) => {
+      setDraft(content);
+      void sendMessage(undefined, content);
+    });
+    transcriptSessionRef.current = transcriptSession;
     recognition.onresult = (event) => {
-      const transcriptParts: string[] = [];
+      const segments = [];
       for (let index = 0; index < event.results.length; index += 1) {
-        transcriptParts.push(event.results[index][0].transcript.trim());
+        segments.push({
+          transcript: event.results[index][0].transcript,
+          isFinal: event.results[index].isFinal,
+        });
       }
-      const transcript = transcriptParts.filter(Boolean).join(" ");
-      if (transcript) {
-        setDraft([recognitionDraftRef.current, transcript.trim()].filter(Boolean).join(" "));
-      }
+      setDraft(transcriptSession.update(segments));
     };
     recognition.onerror = (event) => {
+      transcriptSession.fail();
       setError(
         event.error === "not-allowed"
           ? "Microphone access was denied. You can type your message instead."
@@ -317,13 +336,19 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
       );
       setListening(false);
     };
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      setListening(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      transcriptSession.finish();
+    };
     recognitionRef.current = recognition;
     setError("");
     setListening(true);
     try {
       recognition.start();
     } catch {
+      recognitionRef.current = null;
+      transcriptSession.cancel();
       setListening(false);
       setError("The microphone could not be started. Try again or use the text composer.");
     }
@@ -486,8 +511,8 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                   {!Recognition
                     ? "Voice input is not supported here. Type a message below instead."
                     : listening
-                      ? "Say what you need, then stop listening to review your transcript."
-                      : "Tap the microphone to dictate a message. You can review it before sending."}
+                      ? "Say what you need. JARVIS will send the transcript when listening ends."
+                      : "Tap the microphone and speak naturally. JARVIS sends the transcript when you finish."}
                 </p>
               </div>
             ) : (
@@ -615,7 +640,9 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                     type="button"
                     className={`composer-icon ${listening ? "composer-listening" : ""}`}
                     onClick={toggleRecognition}
+                    disabled={sending}
                     aria-label={listening ? "Stop listening" : "Start voice input"}
+                    aria-pressed={listening}
                   >
                     {listening ? <MicOff size={17} /> : <Mic size={17} />}
                   </button>
@@ -626,16 +653,20 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                   className="composer-icon"
                   aria-label="Stop speaking"
                   onClick={() => {
-                    window.speechSynthesis.cancel();
+                    speechSequenceRef.current += 1;
+                    cancelSpeech(window.speechSynthesis);
                     setSpeaking(false);
                   }}
                 >
                   <StopCircle size={17} />
                 </button>
               )}
-              {voiceMode && speaking && (
-                <span className="voice-speaking-status" role="status">
-                  Speaking response
+              {voiceMode && (speaking || listening) && (
+                <span
+                  className={`voice-speaking-status ${listening ? "voice-listening-status" : ""}`}
+                  role="status"
+                >
+                  {listening ? "Listening — transcript sends when you finish" : "Speaking response"}
                 </span>
               )}
               <span className="composer-hint">Enter to send Â· Shift + Enter for new line</span>

@@ -19,6 +19,7 @@ postgresDescribe("PostgreSQL API integration", () => {
     `owner-${randomUUID()}@integration.test`,
     `other-${randomUUID()}@integration.test`,
   ];
+  const testUserIds: string[] = [];
   const testPassword = "Integration-test-password-123";
 
   beforeAll(async () => {
@@ -40,7 +41,9 @@ postgresDescribe("PostgreSQL API integration", () => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
     }
-    await prisma.user.deleteMany({ where: { email: { in: testEmails } } });
+    if (testUserIds.length) {
+      await prisma.user.deleteMany({ where: { id: { in: testUserIds } } });
+    }
     await prisma.$disconnect();
   });
 
@@ -59,6 +62,7 @@ postgresDescribe("PostgreSQL API integration", () => {
       const payload = (await response.json()) as {
         data: { user: { id: string }; csrfToken: string };
       };
+      testUserIds.push(payload.data.user.id);
       const cookie = response.headers.get("set-cookie")?.split(";")[0];
       if (!cookie) throw new Error("Registration did not set a session cookie.");
       const setCookie = response.headers.get("set-cookie") ?? "";
@@ -121,5 +125,132 @@ postgresDescribe("PostgreSQL API integration", () => {
     });
     expect(invalidCsrf.status).toBe(403);
     expect((await invalidCsrf.json()).error.code).toBe("CSRF_INVALID");
+
+    await prisma.task.createMany({
+      data: Array.from({ length: 101 }, (_, index) => ({
+        userId: owner.user.id,
+        title: `Pagination task ${index}`,
+      })),
+    });
+    const listedTasks: string[] = [];
+    let taskCursor: string | null = null;
+    do {
+      const query = new URLSearchParams({ limit: "50" });
+      if (taskCursor) query.set("cursor", taskCursor);
+      const taskPage = await fetch(`${origin}/api/v1/tasks?${query}`, {
+        headers: { Cookie: loginCookie },
+      });
+      expect(taskPage.status).toBe(200);
+      const payload = (await taskPage.json()).data as {
+        tasks: Array<{ id: string }>;
+        pagination: { nextCursor: string | null };
+      };
+      listedTasks.push(...payload.tasks.map(({ id }) => id));
+      taskCursor = payload.pagination.nextCursor;
+    } while (taskCursor);
+    expect(listedTasks).toHaveLength(101);
+    expect(new Set(listedTasks).size).toBe(101);
+
+    const agentInstruction = "Create task: Review Agent Mode action";
+    const idempotencyKey = randomUUID();
+    const createAgentTask = () =>
+      fetch(`${origin}/api/v1/agent/tasks`, {
+        method: "POST",
+        headers: {
+          Cookie: loginCookie,
+          "Content-Type": "application/json",
+          "X-CSRF-Token": loginPayload.data.csrfToken,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ instruction: agentInstruction }),
+      });
+    const createdAgentTask = await createAgentTask();
+    expect(createdAgentTask.status).toBe(201);
+    const createdAgentTaskData = (await createdAgentTask.json()).data as {
+      id: string;
+      status: string;
+    };
+    expect(createdAgentTaskData.status).toBe("completed");
+
+    const retriedAgentTask = await createAgentTask();
+    expect(retriedAgentTask.status).toBe(200);
+    expect((await retriedAgentTask.json()).data.id).toBe(createdAgentTaskData.id);
+    expect(
+      await prisma.task.count({
+        where: { userId: owner.user.id, title: "Review Agent Mode action" },
+      }),
+    ).toBe(1);
+
+    const ownerAgentHistory = await fetch(`${origin}/api/v1/agent/tasks`, {
+      headers: { Cookie: loginCookie },
+    });
+    expect(ownerAgentHistory.status).toBe(200);
+    expect((await ownerAgentHistory.json()).data).toHaveLength(1);
+
+    const otherCapabilities = await fetch(`${origin}/api/v1/agent/capabilities`, {
+      headers: { Cookie: other.cookie },
+    });
+    expect(otherCapabilities.status).toBe(200);
+    const capabilitiesData = (await otherCapabilities.json()).data as {
+      enabled: boolean;
+    };
+    expect(capabilitiesData.enabled).toBe(true);
+
+    const otherTasks = await fetch(`${origin}/api/v1/tasks`, {
+      headers: { Cookie: other.cookie },
+    });
+    expect(otherTasks.status).toBe(200);
+    expect((await otherTasks.json()).data.tasks).toHaveLength(0);
+
+    const otherAgentHistory = await fetch(`${origin}/api/v1/agent/tasks`, {
+      headers: { Cookie: other.cookie },
+    });
+    expect(otherAgentHistory.status).toBe(200);
+    expect((await otherAgentHistory.json()).data).toHaveLength(0);
+
+    const otherAgentTask = await fetch(`${origin}/api/v1/agent/tasks/${createdAgentTaskData.id}`, {
+      headers: { Cookie: other.cookie },
+    });
+    expect(otherAgentTask.status).toBe(404);
+
+    const unauthorizedAgentExecution = await fetch(`${origin}/api/v1/agent/tasks`, {
+      method: "POST",
+      headers: {
+        Cookie: other.cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": other.csrfToken,
+        "Idempotency-Key": randomUUID(),
+      },
+      body: JSON.stringify({ instruction: agentInstruction }),
+    });
+    expect(unauthorizedAgentExecution.status).toBe(201);
+    const otherExecution = (await unauthorizedAgentExecution.json()).data as {
+      id: string;
+      status: string;
+    };
+    expect(otherExecution.status).toBe("completed");
+    expect(
+      await prisma.task.count({
+        where: { userId: other.user.id, title: "Review Agent Mode action" },
+      }),
+    ).toBe(1);
+
+    const unauthorizedCancellation = await fetch(
+      `${origin}/api/v1/agent/tasks/${createdAgentTaskData.id}/cancel`,
+      {
+        method: "POST",
+        headers: { Cookie: other.cookie, "X-CSRF-Token": other.csrfToken },
+      },
+    );
+    expect(unauthorizedCancellation.status).toBe(404);
+
+    const deletedAgentHistory = await fetch(
+      `${origin}/api/v1/agent/tasks/${createdAgentTaskData.id}`,
+      {
+        method: "DELETE",
+        headers: { Cookie: loginCookie, "X-CSRF-Token": loginPayload.data.csrfToken },
+      },
+    );
+    expect(deletedAgentHistory.status).toBe(200);
   });
 });

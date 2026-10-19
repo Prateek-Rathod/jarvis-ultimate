@@ -20,6 +20,8 @@ model User {
   tasks         Task[]
   reminders     Reminder[]
   memories      Memory[]
+  agentEntitlement AgentEntitlement?
+  agentTasks    AgentTask[]
 }
 
 model Session {
@@ -42,6 +44,9 @@ model UserPreference {
   memoryEnabled Boolean  @default(true)
   autoSpeak     Boolean  @default(false)
   speechRate    Float    @default(1)
+  speechPitch   Float    @default(1)
+  speechVoice   String?
+  reduceMotion  Boolean  @default(false)
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -88,6 +93,50 @@ model Task {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, dueAt])
+}
+
+model AgentEntitlement {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  status       String   @default("inactive")
+  capabilities String[] @default([])
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AgentTask {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  instruction    String           @db.Text
+  status         String           @default("queued")
+  result         String?          @db.Text
+  idempotencyKey String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  completedAt    DateTime?
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps          AgentTaskStep[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+}
+
+model AgentTaskStep {
+  id          String    @id @default(uuid()) @db.Uuid
+  agentTaskId String    @db.Uuid
+  position    Int
+  tool        String
+  description String
+  risk        String
+  status      String    @default("queued")
+  result      String?   @db.Text
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  agentTask   AgentTask @relation(fields: [agentTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([agentTaskId, position])
 }
 
 model Reminder {

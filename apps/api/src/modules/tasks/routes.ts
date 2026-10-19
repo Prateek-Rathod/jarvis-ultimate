@@ -7,15 +7,30 @@ import { taskInputSchema, taskUpdateSchema } from "./validation.js";
 export const taskRouter = Router();
 taskRouter.use(authenticate);
 
+const taskListQuerySchema = z.object({
+  status: z.enum(["open", "completed"]).optional(),
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
 taskRouter.get("/", async (request, response, next) => {
   try {
-    const status = z.enum(["open", "completed"]).optional().parse(request.query.status);
+    const { status, cursor, limit } = taskListQuerySchema.parse(request.query);
     const tasks = await prisma.task.findMany({
       where: { userId: request.auth!.user.id, ...(status ? { status } : {}) },
-      orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
-      take: 100,
+      orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }, { id: "asc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
     });
-    response.json({ success: true, data: tasks });
+    const hasMore = tasks.length > limit;
+    const page = hasMore ? tasks.slice(0, limit) : tasks;
+    response.json({
+      success: true,
+      data: {
+        tasks: page,
+        pagination: { nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null },
+      },
+    });
   } catch (error) {
     next(error);
   }

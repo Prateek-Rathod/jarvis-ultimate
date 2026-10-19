@@ -13,6 +13,8 @@ import { taskRouter } from "./modules/tasks/routes.js";
 import { conversationRouter } from "./modules/conversations/routes.js";
 import { memoryRouter } from "./modules/memory/routes.js";
 import { dashboardRouter } from "./modules/dashboard/routes.js";
+import { preferenceRouter } from "./modules/preferences/routes.js";
+import { agentRouter } from "./modules/agent/routes.js";
 
 export function createApp(
   databaseProbe: () => Promise<unknown> = () => prisma.$queryRaw`SELECT 1`,
@@ -93,6 +95,8 @@ export function createApp(
   app.use("/api/v1/tasks", taskRouter);
   app.use("/api/v1/conversations", conversationRouter);
   app.use("/api/v1/memories", memoryRouter);
+  app.use("/api/v1/preferences", preferenceRouter);
+  app.use("/api/v1/agent", agentRouter);
   app.use("/api/v1/dashboard", dashboardRouter);
 
   app.use((_request, response) => {

@@ -7,6 +7,8 @@ import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { VoicePage } from "./features/voice/VoicePage";
 import { MemoriesPage } from "./features/memory/MemoriesPage";
+import { SettingsPage } from "./features/settings/SettingsPage";
+import { AgentModePage } from "./features/agent/AgentModePage";
 import type { User } from "./types";
 
 type SessionResult = { user: User; csrfToken: string };
@@ -90,6 +92,7 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/agent" element={<AgentModePage />} />
       <Route
         element={
           <AppShell
@@ -106,6 +109,7 @@ export default function App() {
         <Route path="voice" element={<VoicePage />} />
         <Route path="assistant" element={<Navigate to="/voice" replace />} />
         <Route path="memory" element={<MemoriesPage />} />
+        <Route path="settings" element={<SettingsPage user={user} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
