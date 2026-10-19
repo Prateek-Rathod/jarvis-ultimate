@@ -47,27 +47,19 @@ async function findOwnedTask(userId: string, id: string) {
   });
 }
 
-agentRouter.get("/capabilities", async (request, response, next) => {
-  try {
-    const entitlement = await prisma.agentEntitlement.findUnique({
-      where: { userId: request.auth!.user.id },
-      select: { status: true, capabilities: true, expiresAt: true },
-    });
-    response.json({
-      success: true,
-      data: {
-        enabled: isAgentModeEnabled(entitlement),
-        tools: agentTools.map(({ name, description, risk, requiresConfirmation }) => ({
-          name,
-          description,
-          risk,
-          requiresConfirmation,
-        })),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
+agentRouter.get("/capabilities", (_request, response) => {
+  response.json({
+    success: true,
+    data: {
+      enabled: isAgentModeEnabled(),
+      tools: agentTools.map(({ name, description, risk, requiresConfirmation }) => ({
+        name,
+        description,
+        risk,
+        requiresConfirmation,
+      })),
+    },
+  });
 });
 
 agentRouter.get("/tasks", async (request, response, next) => {
@@ -135,20 +127,6 @@ agentRouter.post("/tasks", createAgentTaskLimiter, requireCsrf, async (request, 
       return;
     }
 
-    const entitlement = await prisma.agentEntitlement.findUnique({
-      where: { userId },
-      select: { status: true, capabilities: true, expiresAt: true },
-    });
-    if (!isAgentModeEnabled(entitlement)) {
-      agentError(
-        response,
-        403,
-        "AGENT_ENTITLEMENT_REQUIRED",
-        "Agent Mode is unavailable for this account.",
-      );
-      return;
-    }
-
     const agentTask = await prisma.agentTask.create({
       data: {
         userId,
@@ -196,17 +174,13 @@ agentRouter.post("/tasks", createAgentTaskLimiter, requireCsrf, async (request, 
       agentError(response, 400, "AGENT_TOOL_NOT_FOUND", "The planned tool is not registered.");
       return;
     }
-    const policy = evaluateAgentPolicy(entitlement, "agent_mode", tool.risk);
+    const policy = evaluateAgentPolicy(tool.risk);
     if (!policy.allowed) {
       agentError(
         response,
-        policy.reason === "entitlement_required" ? 403 : 409,
-        policy.reason === "entitlement_required"
-          ? "AGENT_ENTITLEMENT_REQUIRED"
-          : "AGENT_APPROVAL_REQUIRED",
-        policy.reason === "entitlement_required"
-          ? "Agent Mode is unavailable for this account."
-          : "This action requires a separate approval flow that is not yet available.",
+        409,
+        "AGENT_APPROVAL_REQUIRED",
+        "This action requires a separate approval flow that is not yet available.",
       );
       return;
     }

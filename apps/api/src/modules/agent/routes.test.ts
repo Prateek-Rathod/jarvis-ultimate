@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => {
   };
   return {
     transaction,
-    agentEntitlementFindUnique: vi.fn(),
     agentTaskCreate: vi.fn(),
     agentTaskFindFirst: vi.fn(),
     agentTaskFindMany: vi.fn(),
@@ -30,7 +29,6 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../../database/client.js", () => ({
   prisma: {
-    agentEntitlement: { findUnique: mocks.agentEntitlementFindUnique },
     agentTask: {
       create: mocks.agentTaskCreate,
       findFirst: mocks.agentTaskFindFirst,
@@ -41,13 +39,20 @@ vi.mock("../../database/client.js", () => ({
   },
 }));
 vi.mock("../../config/env.js", () => ({
-  env: { NODE_ENV: "development" },
+  env: { NODE_ENV: "production" },
 }));
 vi.mock("express-rate-limit", () => ({
   rateLimit: () => (_request: Request, _response: Response, next: NextFunction) => next(),
 }));
 vi.mock("../../middleware/authentication.js", () => ({
-  authenticate: (request: Request, _response: Response, next: NextFunction) => {
+  authenticate: (request: Request, response: Response, next: NextFunction) => {
+    if (request.get("x-test-unauthenticated") === "true") {
+      response.status(401).json({
+        success: false,
+        error: { code: "UNAUTHENTICATED", message: "Please sign in to continue." },
+      });
+      return;
+    }
     request.auth = {
       user: {
         id: "authenticated-user",
@@ -81,11 +86,6 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 
 const taskId = "d5436d73-fc15-47bf-844e-674de55e6201";
 const idempotencyKey = "13ab38c4-2809-43ef-b29f-a339672621c0";
-const enabledEntitlement = {
-  status: "active",
-  capabilities: ["agent_mode"],
-  expiresAt: null,
-};
 const completedAgentTask = {
   id: taskId,
   userId: "authenticated-user",
@@ -108,8 +108,6 @@ describe("Agent Mode routes", () => {
   });
 
   beforeEach(() => {
-    mocks.agentEntitlementFindUnique.mockReset();
-    mocks.agentEntitlementFindUnique.mockResolvedValue(null);
     mocks.agentTaskCreate.mockReset();
     mocks.agentTaskFindFirst.mockReset();
     mocks.agentTaskFindMany.mockReset();
@@ -131,7 +129,7 @@ describe("Agent Mode routes", () => {
     });
   });
 
-  it("reports local testing access and the supported tool list", async () => {
+  it("reports Agent Mode enabled for an authenticated production user without entitlement", async () => {
     const response = await fetch(`${origin}/agent/capabilities`);
 
     expect(response.status).toBe(200);
@@ -157,7 +155,7 @@ describe("Agent Mode routes", () => {
     );
   });
 
-  it("allows signed-in development accounts to run Agent Mode without paid entitlements", async () => {
+  it("allows authenticated production users to run Agent Mode without entitlement", async () => {
     mocks.agentTaskFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(completedAgentTask);
     mocks.agentTaskCreate.mockResolvedValue({ id: taskId });
     mocks.transaction.agentTaskStep.updateMany.mockResolvedValue({ count: 1 });
@@ -180,7 +178,23 @@ describe("Agent Mode routes", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.agentTaskCreate).toHaveBeenCalled();
-    expect(mocks.agentEntitlementFindUnique).toHaveBeenCalled();
+  });
+
+  it("does not allow unauthenticated users to execute Agent Mode actions", async () => {
+    const response = await fetch(`${origin}/agent/tasks`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+        "x-test-unauthenticated": "true",
+      },
+      body: JSON.stringify({ instruction: "Create task: Read Prisma docs" }),
+    });
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("UNAUTHENTICATED");
+    expect(mocks.agentTaskFindFirst).not.toHaveBeenCalled();
+    expect(mocks.agentTaskCreate).not.toHaveBeenCalled();
   });
 
   it("stores website navigation as pending confirmation and only completes after confirmation", async () => {
@@ -201,7 +215,6 @@ describe("Agent Mode routes", () => {
       result: "The browser opened YouTube in a new tab.",
     };
     mocks.agentTaskFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(pendingTask);
-    mocks.agentEntitlementFindUnique.mockResolvedValue(enabledEntitlement);
     mocks.agentTaskCreate.mockResolvedValue({ id: taskId });
     mocks.transaction.agentTaskStep.updateMany.mockResolvedValue({ count: 1 });
     mocks.transaction.agentTask.updateMany.mockResolvedValue({ count: 1 });
@@ -316,7 +329,6 @@ describe("Agent Mode routes", () => {
       steps: [{ position: 1, status: "completed", result: "Added task." }],
     };
     mocks.agentTaskFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(detail);
-    mocks.agentEntitlementFindUnique.mockResolvedValue(enabledEntitlement);
     mocks.agentTaskCreate.mockResolvedValue({ id: taskId });
     mocks.transaction.agentTask.updateMany.mockResolvedValue({ count: 1 });
     mocks.transaction.agentTaskStep.updateMany.mockResolvedValue({ count: 1 });
@@ -366,7 +378,6 @@ describe("Agent Mode routes", () => {
       plan: { tool: "create_task", arguments: { title: "revise DBMS" } },
     });
     mocks.agentTaskFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(detail);
-    mocks.agentEntitlementFindUnique.mockResolvedValue(enabledEntitlement);
     mocks.agentTaskCreate.mockResolvedValue({ id: taskId });
     mocks.transaction.agentTask.updateMany.mockResolvedValue({ count: 1 });
     mocks.transaction.agentTaskStep.updateMany.mockResolvedValue({ count: 1 });

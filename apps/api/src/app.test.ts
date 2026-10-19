@@ -120,6 +120,17 @@ describe("API security and liveness", () => {
     const agentCapabilities = await fetch(`${origin}/api/v1/agent/capabilities`);
     expect(agentCapabilities.status).toBe(401);
     expect((await agentCapabilities.json()).error.code).toBe("UNAUTHENTICATED");
+
+    const agentAction = await fetch(`${origin}/api/v1/agent/tasks`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "13ab38c4-2809-43ef-b29f-a339672621c0",
+      },
+      body: JSON.stringify({ instruction: "Create task: Unauthorized action" }),
+    });
+    expect(agentAction.status).toBe(401);
+    expect((await agentAction.json()).error.code).toBe("UNAUTHENTICATED");
   });
 
   it("rejects state-changing requests from an untrusted origin", async () => {
