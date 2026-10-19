@@ -1,0 +1,6 @@
+node_modules/
+coverage/
+apps/api/dist/
+apps/web/dist/
+package-lock.json
+note.txt
