@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, getCsrfToken, setCsrfToken } from "./api";
+import { API_BASE_URL, apiRequest, buildApiUrl, getCsrfToken, setCsrfToken } from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -8,6 +8,11 @@ afterEach(() => {
 });
 
 describe("apiRequest", () => {
+  it("builds API URLs from the configured base URL", () => {
+    expect(API_BASE_URL.endsWith("/")).toBe(false);
+    expect(buildApiUrl("/api/v1/auth/session")).toBe(`${API_BASE_URL}/api/v1/auth/session`);
+  });
+
   it("returns the API data envelope and includes session credentials", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -22,7 +27,7 @@ describe("apiRequest", () => {
 
     await expect(apiRequest<{ id: string }>("/api/v1/tasks")).resolves.toEqual({ id: "task-1" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/tasks",
+      buildApiUrl("/api/v1/tasks"),
       expect.objectContaining({ credentials: "include" }),
     );
   });

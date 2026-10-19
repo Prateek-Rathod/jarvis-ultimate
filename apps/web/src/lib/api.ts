@@ -1,4 +1,4 @@
-export interface ApiErrorPayload {
+﻿export interface ApiErrorPayload {
   success: false;
   error: { code: string; message: string };
   requestId?: string;
@@ -16,7 +16,12 @@ export class ApiError extends Error {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 let csrfToken: string | null = null;
+
+export function buildApiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
 
 export function setCsrfToken(value: string | null): void {
   csrfToken = value;
@@ -45,7 +50,12 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   try {
     let response: Response;
     try {
-      response = await fetch(path, { ...options, headers, credentials: "include", signal });
+      response = await fetch(buildApiUrl(path), {
+        ...options,
+        headers,
+        credentials: "include",
+        signal,
+      });
     } catch (cause) {
       if (options.signal?.aborted) throw cause;
       if (timeoutController.signal.aborted) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+﻿import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,7 +16,7 @@ import {
   Square,
   StopCircle,
 } from "lucide-react";
-import { apiRequest, ApiError, getCsrfToken } from "../../lib/api";
+import { apiRequest, ApiError, buildApiUrl, getCsrfToken } from "../../lib/api";
 import type { Conversation, Message } from "../../types";
 
 interface SpeechRecognitionResult {
@@ -149,13 +149,16 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
         requestTimedOut = true;
         controller.abort();
       }, 60_000);
-      const response = await fetch(`/api/v1/conversations/${conversationId}/messages`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() ?? "" },
-        body: JSON.stringify({ content }),
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        buildApiUrl(`/api/v1/conversations/${conversationId}/messages`),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() ?? "" },
+          body: JSON.stringify({ content }),
+          signal: controller.signal,
+        },
+      );
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as {
@@ -368,7 +371,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
         </button>
         <div className="conversation-list">
           {conversationsQuery.isLoading && (
-            <span className="conversation-hint">Loading conversations…</span>
+            <span className="conversation-hint">Loading conversationsâ€¦</span>
           )}
           {conversationsQuery.isError && (
             <div className="conversation-hint">
@@ -447,7 +450,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
         >
           {messagesQuery.isLoading && activeConversationId && (
             <div className="message-loading">
-              <LoaderCircle size={16} /> Loading conversation…
+              <LoaderCircle size={16} /> Loading conversationâ€¦
             </div>
           )}
           {messagesQuery.isError && activeConversationId && (
@@ -473,10 +476,10 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                   aria-pressed={listening}
                 >
                   {listening ? <MicOff size={23} /> : <Mic size={23} />}
-                  <span>{!Recognition ? "Unavailable" : listening ? "Listening…" : "Speak"}</span>
+                  <span>{!Recognition ? "Unavailable" : listening ? "Listeningâ€¦" : "Speak"}</span>
                 </button>
                 <span className="eyebrow">VOICE ASSISTANT</span>
-                <h1>{listening ? "I’m listening." : "Speak to JARVIS"}</h1>
+                <h1>{listening ? "Iâ€™m listening." : "Speak to JARVIS"}</h1>
                 <p>
                   {!Recognition
                     ? "Voice input is not supported here. Type a message below instead."
@@ -583,7 +586,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
           <div className="chat-error" role="alert">
             <span>{error}</span>
             <button onClick={() => setError("")} aria-label="Dismiss error">
-              ×
+              Ã—
             </button>
           </div>
         )}
@@ -601,7 +604,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                   void sendMessage();
                 }
               }}
-              placeholder={listening ? "Listening… say something" : "Message JARVIS…"}
+              placeholder={listening ? "Listeningâ€¦ say something" : "Message JARVISâ€¦"}
             />
             <div className="composer-controls">
               {Recognition &&
@@ -633,7 +636,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
                   Speaking response
                 </span>
               )}
-              <span className="composer-hint">Enter to send · Shift + Enter for new line</span>
+              <span className="composer-hint">Enter to send Â· Shift + Enter for new line</span>
               {sending ? (
                 <button
                   type="button"
@@ -665,5 +668,5 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
 }
 
 function ArrowIcon() {
-  return <span aria-hidden="true">↗</span>;
+  return <span aria-hidden="true">â†—</span>;
 }
