@@ -47,4 +47,4 @@ An SSE `event: error` identifies failures that occur after streaming starts. If 
 
 ## Validation, CORS, and limits
 
-Request bodies are limited to 64 KB. Zod validation failures return `400 VALIDATION_ERROR`. CORS only allows the configured `WEB_ORIGIN`; state-changing requests with a different `Origin` are rejected. Configure `WEB_ORIGIN` to the exact production web origin.
+Request bodies are limited to 64 KB. Zod validation failures return `400 VALIDATION_ERROR`. CORS only allows the configured `WEB_ORIGIN`; state-changing requests with a different `Origin` are rejected. Configure `WEB_ORIGIN` to the exact frontend origin (without a path); trailing slashes are normalized. In production, use the Vercel same-origin rewrites for `/api/*` and `/health/*` so cookies and streaming requests remain on the frontend origin.

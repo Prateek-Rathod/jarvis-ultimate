@@ -272,7 +272,7 @@ conversationRouter.post(
 
       response.status(200);
       response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-      response.setHeader("Cache-Control", "no-cache, no-transform");
+      response.setHeader("Cache-Control", "no-cache, no-store, no-transform");
       response.setHeader("Connection", "keep-alive");
       response.setHeader("X-Accel-Buffering", "no");
       response.flushHeaders();

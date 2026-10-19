@@ -16,11 +16,88 @@ export class ApiError extends Error {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 let csrfToken: string | null = null;
 
+export function normalizeApiBaseUrl(
+  value: string,
+  options: { production: boolean; pageOrigin?: string },
+): string {
+  const configuredValue = value.trim().replace(/\/+$/, "");
+  if (!configuredValue) {
+    if (options.production) {
+      throw new ApiError(
+        "VITE_API_BASE_URL is missing. Set it to this Vercel site's HTTPS origin; API requests are proxied to the backend.",
+        0,
+        "API_CONFIG_INVALID",
+      );
+    }
+    return "";
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configuredValue);
+  } catch {
+    throw new ApiError(
+      "VITE_API_BASE_URL must be a valid HTTP(S) origin.",
+      0,
+      "API_CONFIG_INVALID",
+    );
+  }
+
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new ApiError(
+      "VITE_API_BASE_URL must contain only an HTTP(S) origin, without credentials or a path.",
+      0,
+      "API_CONFIG_INVALID",
+    );
+  }
+
+  if (options.production && parsed.protocol !== "https:") {
+    throw new ApiError("VITE_API_BASE_URL must use HTTPS in production.", 0, "API_CONFIG_INVALID");
+  }
+
+  if (
+    options.production &&
+    (parsed.hostname === "localhost" ||
+      parsed.hostname.endsWith(".localhost") ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "[::1]" ||
+      parsed.hostname === "0.0.0.0")
+  ) {
+    throw new ApiError(
+      "VITE_API_BASE_URL cannot point to localhost in production.",
+      0,
+      "API_CONFIG_INVALID",
+    );
+  }
+
+  if (options.production && options.pageOrigin && parsed.origin !== options.pageOrigin) {
+    throw new ApiError(
+      "VITE_API_BASE_URL must match this Vercel site's origin so session cookies remain same-site.",
+      0,
+      "API_CONFIG_INVALID",
+    );
+  }
+
+  return parsed.origin;
+}
+
 export function buildApiUrl(path: string): string {
-  return `${API_BASE_URL}${path}`;
+  const baseUrl = normalizeApiBaseUrl(API_BASE_URL, {
+    production: import.meta.env.PROD,
+    ...(import.meta.env.PROD ? { pageOrigin: window.location.origin } : {}),
+  });
+  const normalizedPath = path.replace(/^\/+/, "");
+  return baseUrl ? new URL(normalizedPath, `${baseUrl}/`).toString() : `/${normalizedPath}`;
 }
 
 export function setCsrfToken(value: string | null): void {

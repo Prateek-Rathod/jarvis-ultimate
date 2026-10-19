@@ -61,6 +61,11 @@ postgresDescribe("PostgreSQL API integration", () => {
       };
       const cookie = response.headers.get("set-cookie")?.split(";")[0];
       if (!cookie) throw new Error("Registration did not set a session cookie.");
+      const setCookie = response.headers.get("set-cookie") ?? "";
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("SameSite=Strict");
+      expect(setCookie).toContain("Path=/");
+      expect(setCookie).not.toMatch(/;\s*Domain=/i);
       return { cookie, ...payload.data };
     }
 
@@ -72,6 +77,7 @@ postgresDescribe("PostgreSQL API integration", () => {
       body: JSON.stringify({ email: testEmails[0], password: testPassword }),
     });
     expect(login.status).toBe(200);
+    const loginPayload = (await login.json()) as { data: { csrfToken: string } };
     const loginCookie = login.headers.get("set-cookie")?.split(";")[0];
     if (!loginCookie) throw new Error("Login did not set a session cookie.");
 
@@ -84,9 +90,9 @@ postgresDescribe("PostgreSQL API integration", () => {
     const created = await fetch(`${origin}/api/v1/conversations`, {
       method: "POST",
       headers: {
-        Cookie: owner.cookie,
+        Cookie: loginCookie,
         "Content-Type": "application/json",
-        "X-CSRF-Token": owner.csrfToken,
+        "X-CSRF-Token": loginPayload.data.csrfToken,
       },
       body: JSON.stringify({}),
     });
@@ -103,5 +109,17 @@ postgresDescribe("PostgreSQL API integration", () => {
     });
     expect(otherMessages.status).toBe(404);
     expect((await otherMessages.json()).error.code).toBe("CONVERSATION_NOT_FOUND");
+
+    const invalidCsrf = await fetch(`${origin}/api/v1/conversations`, {
+      method: "POST",
+      headers: {
+        Cookie: loginCookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": "incorrect-token",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(invalidCsrf.status).toBe(403);
+    expect((await invalidCsrf.json()).error.code).toBe("CSRF_INVALID");
   });
 });

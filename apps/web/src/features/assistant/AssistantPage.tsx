@@ -19,6 +19,8 @@ import {
 import { apiRequest, ApiError, buildApiUrl, getCsrfToken } from "../../lib/api";
 import type { Conversation, Message } from "../../types";
 
+const STREAM_REQUEST_TIMEOUT_MS = 130_000;
+
 interface SpeechRecognitionResult {
   readonly isFinal: boolean;
   readonly 0: { readonly transcript: string };
@@ -148,7 +150,7 @@ export function AssistantPage({ voiceMode = false }: { voiceMode?: boolean }) {
       timeoutId = window.setTimeout(() => {
         requestTimedOut = true;
         controller.abort();
-      }, 60_000);
+      }, STREAM_REQUEST_TIMEOUT_MS);
       const response = await fetch(
         buildApiUrl(`/api/v1/conversations/${conversationId}/messages`),
         {

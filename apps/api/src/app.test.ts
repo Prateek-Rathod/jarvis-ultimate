@@ -1,17 +1,19 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createApp } from "./app.js";
+import { env } from "./config/env.js";
 
 describe("API security and liveness", () => {
+  let app: ReturnType<typeof createApp>;
   let server: Server;
   let origin: string;
   let databaseAvailable = true;
 
   beforeAll(async () => {
-    const app = createApp(async () => {
+    app = createApp(async () => {
       if (!databaseAvailable) throw new Error("database unavailable");
-    });
+    }, 1);
     server = app.listen(0);
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address() as AddressInfo;
@@ -31,6 +33,51 @@ describe("API security and liveness", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
+  it("trusts the configured proxy hop count before rate-limited routes", async () => {
+    expect(app.get("trust proxy")).toBe(1);
+    const rateLimitError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const response = await fetch(`${origin}/api/v1/auth/session`, {
+        headers: { "X-Forwarded-For": "198.51.100.23" },
+      });
+      expect(response.status).toBe(401);
+      expect(rateLimitError).not.toHaveBeenCalled();
+    } finally {
+      rateLimitError.mockRestore();
+    }
+  });
+
+  it("answers credentialed CORS preflight for the exact configured origin", async () => {
+    const response = await fetch(`${origin}/api/v1/auth/login`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: env.WEB_ORIGIN,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,x-csrf-token",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(env.WEB_ORIGIN);
+    expect(response.headers.get("access-control-allow-origin")).not.toBe("*");
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(response.headers.get("access-control-allow-headers")?.toLowerCase()).toContain(
+      "x-csrf-token",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not grant CORS access to another origin", async () => {
+    const response = await fetch(`${origin}/api/v1/auth/session`, {
+      headers: { Origin: "https://untrusted.example" },
+    });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe(env.WEB_ORIGIN);
+    expect(response.headers.get("access-control-allow-origin")).not.toBe(
+      "https://untrusted.example",
+    );
+  });
+
   it("reports database readiness and returns 503 when the database probe fails", async () => {
     const ready = await fetch(`${origin}/health/ready`);
     expect(ready.status).toBe(200);
@@ -40,13 +87,25 @@ describe("API security and liveness", () => {
     });
 
     databaseAvailable = false;
-    const unavailable = await fetch(`${origin}/health/ready`);
-    expect(unavailable.status).toBe(503);
-    expect(await unavailable.json()).toEqual({
-      status: "not_ready",
-      dependencies: { database: "unavailable" },
-    });
-    databaseAvailable = true;
+    const readinessError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const unavailable = await fetch(`${origin}/health/ready`);
+      expect(unavailable.status).toBe(503);
+      expect(await unavailable.json()).toEqual({
+        status: "not_ready",
+        dependencies: { database: "unavailable" },
+      });
+      expect(readinessError).toHaveBeenCalledTimes(1);
+      const diagnostic = JSON.parse(readinessError.mock.calls[0][0] as string) as {
+        message: string;
+      };
+      expect(diagnostic.message).toBe("Database readiness probe failed");
+      expect(readinessError.mock.calls[0][0]).not.toContain("database unavailable");
+    } finally {
+      readinessError.mockRestore();
+      databaseAvailable = true;
+    }
   });
 
   it("reports a logged-out session as unauthenticated", async () => {

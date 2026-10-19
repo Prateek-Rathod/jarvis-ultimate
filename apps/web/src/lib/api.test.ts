@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { API_BASE_URL, apiRequest, buildApiUrl, getCsrfToken, setCsrfToken } from "./api";
+import {
+  API_BASE_URL,
+  apiRequest,
+  buildApiUrl,
+  getCsrfToken,
+  normalizeApiBaseUrl,
+  setCsrfToken,
+} from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -11,6 +18,41 @@ describe("apiRequest", () => {
   it("builds API URLs from the configured base URL", () => {
     expect(API_BASE_URL.endsWith("/")).toBe(false);
     expect(buildApiUrl("/api/v1/auth/session")).toBe(`${API_BASE_URL}/api/v1/auth/session`);
+  });
+
+  it("normalizes the API origin and preserves path and query strings", () => {
+    const baseUrl = normalizeApiBaseUrl("https://jarvis.example///", {
+      production: true,
+      pageOrigin: "https://jarvis.example",
+    });
+    expect(baseUrl).toBe("https://jarvis.example");
+    expect(new URL("api/v1/tasks?status=open&limit=5", `${baseUrl}/`).toString()).toBe(
+      "https://jarvis.example/api/v1/tasks?status=open&limit=5",
+    );
+  });
+
+  it("rejects missing, insecure, and cross-origin production API configuration", () => {
+    expect(() => normalizeApiBaseUrl("", { production: true })).toThrow(
+      expect.objectContaining({ code: "API_CONFIG_INVALID" }),
+    );
+    expect(() =>
+      normalizeApiBaseUrl("http://jarvis.example", {
+        production: true,
+        pageOrigin: "https://jarvis.example",
+      }),
+    ).toThrow(expect.objectContaining({ code: "API_CONFIG_INVALID" }));
+    expect(() =>
+      normalizeApiBaseUrl("https://api.example", {
+        production: true,
+        pageOrigin: "https://jarvis.example",
+      }),
+    ).toThrow(expect.objectContaining({ code: "API_CONFIG_INVALID" }));
+    expect(() =>
+      normalizeApiBaseUrl("https://localhost", {
+        production: true,
+        pageOrigin: "https://localhost",
+      }),
+    ).toThrow(expect.objectContaining({ code: "API_CONFIG_INVALID" }));
   });
 
   it("returns the API data envelope and includes session credentials", async () => {

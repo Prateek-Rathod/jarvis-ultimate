@@ -16,11 +16,24 @@ import { dashboardRouter } from "./modules/dashboard/routes.js";
 
 export function createApp(
   databaseProbe: () => Promise<unknown> = () => prisma.$queryRaw`SELECT 1`,
+  trustProxyHops = env.TRUST_PROXY_HOPS,
 ) {
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", trustProxyHops);
   app.use(helmet());
-  app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
+  app.use(["/api", "/health"], (_request, response, next) => {
+    response.setHeader("Cache-Control", "no-store");
+    next();
+  });
+  app.use(
+    cors({
+      origin: env.WEB_ORIGIN,
+      credentials: true,
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "X-CSRF-Token"],
+    }),
+  );
   app.use(express.json({ limit: "64kb" }));
   app.use(cookieParser());
   app.use(requestContext);
@@ -43,11 +56,28 @@ export function createApp(
     response.json({ status: "ok" });
   });
 
-  app.get("/health/ready", async (_request, response) => {
+  app.get("/health/ready", async (request, response) => {
     try {
       await databaseProbe();
       response.json({ status: "ready", dependencies: { database: "available" } });
-    } catch {
+    } catch (error) {
+      const errorCode =
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string" &&
+        /^[A-Z][A-Z0-9_]{0,31}$/.test(error.code)
+          ? error.code
+          : undefined;
+      console.error(
+        JSON.stringify({
+          level: "error",
+          requestId: request.requestId,
+          name: error instanceof Error ? error.name : "UnknownError",
+          code: errorCode,
+          message: "Database readiness probe failed",
+        }),
+      );
       response.status(503).json({ status: "not_ready", dependencies: { database: "unavailable" } });
     }
   });

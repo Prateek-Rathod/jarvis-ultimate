@@ -15,6 +15,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionUnavailable, setSessionUnavailable] = useState(false);
+  const [sessionUnavailableMessage, setSessionUnavailableMessage] = useState("");
   const [sessionAttempt, setSessionAttempt] = useState(0);
 
   useEffect(() => {
@@ -25,12 +26,19 @@ export default function App() {
         setUser(session.user);
         setCsrfToken(session.csrfToken);
         setSessionUnavailable(false);
+        setSessionUnavailableMessage("");
       })
       .catch((cause: unknown) => {
         if (active) {
           setUser(null);
           setCsrfToken(null);
-          setSessionUnavailable(!(cause instanceof ApiError && cause.status === 401));
+          const unauthorized = cause instanceof ApiError && cause.status === 401;
+          setSessionUnavailable(!unauthorized);
+          setSessionUnavailableMessage(
+            cause instanceof ApiError && cause.code === "API_CONFIG_INVALID"
+              ? cause.message
+              : "Could not reach the API. Check that it is running, then retry your session.",
+          );
         }
       })
       .finally(() => {
@@ -54,7 +62,7 @@ export default function App() {
     return (
       <main className="startup-screen startup-error-screen" role="alert">
         <h1>JARVIS is temporarily unavailable</h1>
-        <p>Could not reach the API. Check that it is running, then retry your session.</p>
+        <p>{sessionUnavailableMessage}</p>
         <button
           className="primary-button"
           type="button"
