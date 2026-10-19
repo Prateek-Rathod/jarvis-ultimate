@@ -6,7 +6,7 @@ dotenv.config({ path: process.env.ENV_FILE ?? "../../.env" });
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
-  API_PORT: z.coerce.number().int().positive().default(3001),
+  API_PORT: z.coerce.number().int().positive().default(Number(process.env.PORT) || 3001),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   SESSION_COOKIE_NAME: z.string().default("jarvis_session"),
   SESSION_TTL_HOURS: z.coerce.number().positive().default(168),
